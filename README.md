@@ -29,6 +29,7 @@ cmake -B ./build -G <your generator> .
 ## Dependencies
 FactAstra project has the following dependencies:
 * [Spectre2D](https://github.com/DragonGamesStudios/Spectre2D)
+* [zlib](http://www.zlib.net/)
 
 Spectre2D library also has its dependencies. Since it's static, they also need to be included in the build.
 

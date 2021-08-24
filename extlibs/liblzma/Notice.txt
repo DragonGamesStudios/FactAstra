@@ -1,0 +1,1 @@
+Project FactAstra uses libIzma library (https://github.com/kobolabs/liblzma).

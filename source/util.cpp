@@ -1,6 +1,6 @@
 #include "util.hpp"
 
-namespace util
+namespace fa_util
 {
 	std::vector<std::string> split(const std::string& input, const std::string& delim)
 	{
@@ -10,7 +10,7 @@ namespace util
 
 		while (end != std::string::npos)
 		{
-			ret.push_back(input.substr(start, end));
+			ret.push_back(input.substr(start, end - start));
 			start = end + delim.length();
 			end = input.find(delim, start);
 		}

@@ -1,15 +1,18 @@
 #include "App.hpp"
 #include "util.hpp"
+
 #include <iostream>
 #include <functional>
+#include <regex>
 
-App::App()
+fa_App::fa_App()
 {
 	appdata_fs = sp::FileSystem(true);
 
 	appdata_fs.createDirIfNecessary("DragonGames");
 	appdata_fs.createDirIfNecessary("DragonGames/FactAstra");
 	appdata_fs.enterDir("DragonGames/FactAstra");
+	appdata_fs.createDirIfNecessary("mods");
 
 	// __local__ is directory the executable is run from
 	// __appdata__ is the game's appdata directory
@@ -29,11 +32,12 @@ App::App()
 	startup_options = {
 		{ "l", appdata_fs.getCorrectPath("log.log").string() },
 	};
+
+	modmanager.register_fs(&local_fs);
 }
 
-void App::run(const std::vector<std::string>& args)
+void fa_App::run(const std::vector<std::string>& args)
 {
-
 	if (args.size() > 1)
 	{
 		std::vector<std::string> arguments;
@@ -94,14 +98,30 @@ void App::run(const std::vector<std::string>& args)
 
 	log << std::endl;
 
+	if (appdata_fs.isRegularFile("mods/configuration.json"))
+	{
+		if (modmanager.load_configuration("__appdata__/mods/configuration.json", log).code != fa_errno::ok)
+			return;
+	}
+	else
+	{
+		if (modmanager.add_mod_directory("__appdata__/mods/", log).code != fa_errno::ok)
+			return;
+		//modmanager.add_mod_directory("__root__/data/");
+	}
+
+	// Console executed AT THE END!
 	if (startup_flags.at("console") || startup_flags.at("modmanager") || startup_flags.at("savemanager"))
 	{
-		console_thread = std::thread(&App::console, this);
+		console_thread = std::thread(&fa_App::console, this);
 	}
 }
 
-void App::quit()
+void fa_App::quit()
 {
+	// Save current config
+	modmanager.save_configuration("__appdata__/mods/configuration.json", log);
+
 	if (console_thread.joinable())
 	{
 		log << "Joining console thread..." << std::endl;
@@ -112,7 +132,7 @@ void App::quit()
 	log.close();
 }
 
-void App::parse_arguments(const std::vector<std::string>& args, std::map<std::string, std::string>& options, std::map<std::string, bool>& flags, std::vector<std::string>& unparsed) const
+void fa_App::parse_arguments(const std::vector<std::string>& args, std::map<std::string, std::string>& options, std::map<std::string, bool>& flags, std::vector<std::string>& unparsed) const
 {
 	for (auto it = args.begin(); it != args.end(); it++)
 	{
@@ -156,7 +176,7 @@ void App::parse_arguments(const std::vector<std::string>& args, std::map<std::st
 	}
 }
 
-void App::console()
+void fa_App::console()
 {
 	std::string command;
 	std::vector<std::string> args;
@@ -171,7 +191,7 @@ void App::console()
 	// Load requested modules
 	if (modmanager_enabled)
 		commands.insert({ "modmanager", {
-			{ "list", std::bind(&App::cmd_modmanager_list, this, std::placeholders::_1) },
+			{ "list", std::bind(&fa_App::cmd_modmanager_list, this, std::placeholders::_1) },
 		} });
 
 	if (savemanager_enabled)
@@ -184,7 +204,7 @@ void App::console()
 		
 		while (!getline(std::cin, command)) {}
 
-		args = util::split(command, " ");
+		args = fa_util::split(command, " ");
 
 		if (args[0] == "quit")
 			running = false;
@@ -231,7 +251,38 @@ void App::console()
 	std::cerr << "Terminating console." << std::endl;
 }
 
-void App::cmd_modmanager_list(const std::vector<std::string>& args)
+void fa_App::cmd_modmanager_list(const std::vector<std::string>& args)
 {
-	std::cout << "Listing things out" << std::endl;
+	std::map<std::string, std::string> options = {
+		{"t", "all"},
+		{"r", ".+"},
+		{"f", "all"}
+	};
+
+	std::map<std::string, bool> flags;
+	std::vector<std::string> unparsed;
+
+	parse_arguments(args, options, flags, unparsed);
+
+	std::string t_option = options.at("t");
+	bool includes_dir = t_option != "zip";
+	bool includes_zip = t_option != "dir";
+
+	std::string f_option = options.at("f");
+	bool includes_enabled = f_option != "disabled";
+	bool includes_disabled = f_option != "enabled";
+
+	std::regex pattern(options.at("r"));
+
+	for (const auto& [name, mod] : modmanager.get_mods())
+	{
+		if (
+			((mod.is_zip && includes_zip) || (!mod.is_zip && includes_dir)) &&
+			((mod.enabled && includes_enabled) || (!mod.enabled && includes_disabled)) &&
+			std::regex_match(name, pattern)
+			)
+		{
+			std::cout << std::endl << "Name: " << name << std::endl << "Title: " << mod.title << std::endl << "Version: " << mod.version.dump() << std::endl;
+		}
+	}
 }

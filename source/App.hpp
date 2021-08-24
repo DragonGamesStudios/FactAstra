@@ -1,13 +1,14 @@
 #pragma once
+#include "ModManager.hpp"
 
 #include <Spectre2D/FileSystem.h>
 
 #include <thread>
 
-class App
+class fa_App
 {
 public:
-	App();
+	fa_App();
 
 	void run(const std::vector<std::string>& args);
 
@@ -23,6 +24,8 @@ private:
 	std::ofstream log;
 
 	std::thread console_thread;
+
+	fa_ModManager modmanager;
 
 	void parse_arguments(const std::vector<std::string>& args, std::map<std::string, std::string>& options, std::map<std::string, bool>& flags, std::vector<std::string>& unparsed) const;
 

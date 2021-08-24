@@ -16,11 +16,18 @@ set(SRC_CPP
     ${SRCDIR}/main.cpp
     ${SRCDIR}/App.cpp
     ${SRCDIR}/util.cpp
+    ${SRCDIR}/ModManager.cpp
+    ${SRCDIR}/json.cpp
+    ${SRCDIR}/Version.cpp
 )
 
 set(SRC_HPP
     ${SRCDIR}/App.hpp
     ${SRCDIR}/util.hpp
+    ${SRCDIR}/ModManager.hpp
+    ${SRCDIR}/json.hpp
+    ${SRCDIR}/Version.hpp
+    ${SRCDIR}/errors.hpp
 )
 
 source_group("Sources" FILES ${SRC_CPP})
@@ -40,7 +47,14 @@ set(LIBS
     Spectre2D
     glfw3
     glew32s
+    zlibstaticd
+    liblzma
+    zstd_static
+    bzip2
+    libminizip
 )
+
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/licenses.txt ${CMAKE_CURRENT_BINARY_DIR}/licenses.txt COPYONLY)
 
 if(CONFIGURATION EQUAL Release)
     set(VS_CONFIGURATION_TYPE Release)

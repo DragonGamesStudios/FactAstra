@@ -12,7 +12,7 @@ int main(int argc, const char** argv)
 		cmd_args.push_back(argv[i]);
 	}
 
-	App app;
+	fa_App app;
 
 	app.run(cmd_args);
 

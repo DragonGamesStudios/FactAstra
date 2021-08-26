@@ -21,11 +21,8 @@ enum class fa_json_errno
 
 struct fa_json_error
 {
-	fa_json_error(fa_json_errno err = fa_json_errno::ok, const std::string& desc = "", std::string::const_iterator iterator = std::string::const_iterator());
-
-	fa_json_errno code;
+	fa_json_errno code = fa_json_errno::ok;
 	std::string description;
-	std::string::const_iterator it;
 };
 
 class fa_json;
@@ -42,8 +39,10 @@ public:
 	using object = std::map<std::string, fa_json>;
 	using arr = std::vector<fa_json>;
 
-	void parse(const std::string& code, fa_json_error* err);
-	std::string dump() const;
+	fa_json_error load(std::istream& code);
+	fa_json_error loads(const std::string& code);
+	void dump(std::ostream& output) const;
+	std::string dumps() const;
 };
 
 std::istream& operator>>(std::istream& input, fa_json& output);

@@ -1,212 +1,257 @@
 #include "json.hpp"
 
-static void parse_value(fa_json& ret, std::string::const_iterator& it, std::string::const_iterator end, fa_json_error* err);
+#include <sstream>
 
-static void await_character(const char c, bool eoi_on_end, std::string::const_iterator& it, std::string::const_iterator end, fa_json_error* err)
+static fa_json_error load_value(fa_json& ret, std::istream& input);
+
+static fa_json_error await_character(const char c, bool eoi_on_end, std::istream& input)
 {
-	while (it != end && (*it == ' ' || *it == '\n' || *it == '\r' || *it == '\t'))
-		it++;
+	fa_json_error error;
 
-	if (it == end && eoi_on_end)
+	char next = input.peek();
+	char _;
+
+	while (!input.eof() && (next == ' ' || next == '\n' || next == '\r' || next == '\t'))
 	{
-		err->code = fa_json_errno::end_of_input;
-		err->description = "End of input when looking for '" + (c ? std::string(1, c) : "non-whitespace character") + "'.";
-		err->it = it;
+		input.get();
+		next = input.peek();
 	}
-	else if (c && *it != c)
+
+	if (input.eof() && eoi_on_end)
 	{
-		err->code = fa_json_errno::unexpected_character;
-		err->description = "Unexpected character '" + std::string(1, *it) + "' when looking for '" + std::string(1, c) + "'.";
-		err->it = it;
+		error.code = fa_json_errno::end_of_input;
+		error.description = "End of input when looking for '" + (c ? std::string(1, c) : "non-whitespace character") + "'.";
 	}
+	else if (c && next != c)
+	{
+		error.code = fa_json_errno::unexpected_character;
+		error.description = "Unexpected character '" + std::string(1, next) + "' when looking for '" + std::string(1, c) + "'.";
+	}
+
+	return error;
 }
 
-static void parse_string(std::string& ret, std::string::const_iterator& it, std::string::const_iterator end, fa_json_error* err)
+static fa_json_error load_string(std::string& ret, std::istream& input)
 {
+	fa_json_error error;
 	bool ignore_next = false;
+	char c = input.get();
 
-	while (it != end && (ignore_next || *it != '\"'))
+	while (!input.eof() && (ignore_next || c != '\"'))
 	{
-		if (!ignore_next && *it == '\\')
+		if (!ignore_next && c == '\\')
 			ignore_next = true;
 		else
 		{
-			ret.push_back(*it);
+			ret.push_back(c);
 			ignore_next = false;
 		}
 
-		it++;
+		c = input.get();
 	}
 
-	if (it == end)
+	if (input.eof())
 	{
-		err->code = fa_json_errno::end_of_input;
-		err->description = "Unexpected end of input when parsing a string.";
-		err->it = it;
+		error.code = fa_json_errno::end_of_input;
+		error.description = "Unexpected end of input when parsing a string.";
 	}
-	else
-		it++;
+
+	return error;
 }
 
-static void parse_object(std::map<std::string, fa_json>& ret, std::string::const_iterator& it, std::string::const_iterator end, fa_json_error* err)
+static fa_json_error load_object(std::map<std::string, fa_json>& ret, std::istream& input)
 {
 	std::string key;
 	fa_json value;
+	fa_json_error error;
+	char c = 0;
 
 	while (true)
 	{
 		// Wait for string
-		await_character(0, true, it, end, err);
+		error = await_character(0, true, input);
 
-		if (*it == '"')
-			parse_string(key, ++it, end, err);
-		else if (*it == '}')
+		if (error.code != fa_json_errno::ok)
+			return error;
+
+		c = input.get();
+
+		if (c == '"')
+			error = load_string(key, input);
+		else if (c == '}')
 			break;
 		else
 		{
-			err->code = fa_json_errno::unexpected_character;
-			err->description = "Unexpected character '" + std::string(1, *it) + "' when parsing object.";
-			err->it = it;
-			return;
+			error.code = fa_json_errno::unexpected_character;
+			error.description = "Unexpected character '" + std::string(1, c) + "' when parsing object.";
+			return error;
 		}
 
+		if (error.code != fa_json_errno::ok)
+			return error;
+
 		// Wait for :
-		await_character(':', true, it, end, err);
+		await_character(':', true, input);
 
-		it++;
+		input.get();
 
-		parse_value(value, it, end, err);
+		error = load_value(value, input);
+
+		if (error.code != fa_json_errno::ok)
+			return error;
 
 		ret.insert({ key, value });
 
-		await_character(0, true, it, end, err);
+		error = await_character(0, true, input);
 
-		if (*it == ',')
+		if (error.code != fa_json_errno::ok)
+			return error;
+
+		c = input.get();
+
+		if (c == ',')
 		{
 			key.clear();
 			value = fa_json::object();
-			it++;
 		}
-		else if (*it == '}')
+		else if (c == '}')
 		{
 			break;
 		}
 		else
 		{
-			err->code = fa_json_errno::unexpected_character;
-			err->description = "Unexpected character '" + std::string(1, *it) + "' when parsing object.";
-			err->it = it;
-			return;
+			error.code = fa_json_errno::unexpected_character;
+			error.description = "Unexpected character '" + std::string(1, c) + "' when parsing object.";
+			return error;
 		}
 	}
 
-	it++;
+	return error;
 }
 
-static void parse_array(std::vector<fa_json>& ret, std::string::const_iterator& it, std::string::const_iterator end, fa_json_error* err)
+static fa_json_error load_array(std::vector<fa_json>& ret, std::istream& input)
 {
+	fa_json_error error;
 	fa_json value;
+	char c = 0;
 
 	while (true)
 	{
-		await_character(0, true, it, end, err);
+		// Can fail
+		error = await_character(0, true, input);
 
-		if (*it == ']')
+		if (error.code != fa_json_errno::ok)
+			return error;
+
+		if (input.peek() == ']')
+		{
+			input.get();
 			break;
+		}
 
-		parse_value(value, it, end, err);
+		error = load_value(value, input);
+
+		if (error.code != fa_json_errno::ok)
+			return error;
 
 		ret.push_back(value);
 
-		await_character(0, true, it, end, err);
+		error = await_character(0, true, input);
 
-		if (*it == ',')
-		{
+		if (error.code != fa_json_errno::ok)
+			return error;
+
+		c = input.get();
+
+		if (c == ',')
 			value = fa_json::object();
-			it++;
-		}
-		else if (*it == ']')
-		{
+		else if (c == ']')
 			break;
-		}
 		else
 		{
-			err->code = fa_json_errno::unexpected_character;
-			err->description = "Unexpected character '" + std::string(1, *it) + "' when parsing array.";
-			err->it = it;
-			return;
+			error.code = fa_json_errno::unexpected_character;
+			error.description = "Unexpected character '" + std::string(1, c) + "' when parsing array.";
+			return error;
 		}
 	}
 
-	it++;
+	return error;
 }
 
 // true -> floating point, false -> integer
-static bool parse_number(long double& ret, std::string::const_iterator& it, std::string::const_iterator end)
+static bool load_number(long double& ret, std::istream& input)
 {
 	bool is_floating = false;
 	long double mul = 1;
+	char c = input.get();
 	ret = 0;
 
-	if (*it == '-')
+	if (c == '-')
 		mul = -1;
 
-	while (it != end && *it >= '0' && *it <= '9')
+	while (!input.eof() && c >= '0' && c <= '9')
 	{
 		ret *= 10;
-		ret += *it - '0';
-		it++;
+		ret += c - '0';
+		c = input.get();
 	}
 
-	if (it != end && *it == '.')
+	if (!input.eof() && c == '.')
 	{
 		is_floating = true;
 		long double divisor = 1;
-		it++;
+		c = input.get();
 
-		while (it != end && *it >= '0' && *it <= '9')
+		while (!input.eof() && c >= '0' && c <= '9')
 		{
 			divisor *= 10;
-			ret += (*it - '0') / divisor;
-			it++;
+			ret += (c - '0') / divisor;
+			c = input.get();
 		}
 	}
 
 	ret *= mul;
+	input.unget();
 
 	return is_floating;
 }
 
-static void parse_value(fa_json& ret, std::string::const_iterator& it, std::string::const_iterator end, fa_json_error* err)
+static fa_json_error load_value(fa_json& ret, std::istream& input)
 {
-	await_character(0, false, it, end, err);
+	// Cannot fail
+	fa_json_error error = await_character(0, false, input);
 
-	if (it != end)
+	if (!input.eof())
 	{
-		switch (*it)
+		char c = input.get();
+
+		switch (c)
 		{
 		case '{':
 			ret = fa_json::object();
-			parse_object(std::get<fa_json::object>(ret), ++it, end, err);
+			error = load_object(std::get<fa_json::object>(ret), input);
 			break;
 
 		case '[':
 			ret = fa_json::arr();
-			parse_array(std::get<fa_json::arr>(ret), ++it, end, err);
+			error = load_array(std::get<fa_json::arr>(ret), input);
 			break;
 
 		case '"':
 			ret = fa_json::string();
-			parse_string(std::get<fa_json::string>(ret), ++it, end, err);
+			error = load_string(std::get<fa_json::string>(ret), input);
 			break;
 
 		default:
-			if ((*it >= '0' && *it <= '9') || *it == '.' || *it == '-')
+			if ((c >= '0' && c <= '9') || c == '.' || c == '-')
 			{
 				long double val = 0;
 
-				// This time we don't advance the iterator, as the first character is already a part of the value.
-				if (parse_number(val, it, end))
+				// This time we  unget the character, as the loaded character is already a part of the value.
+				input.unget();
+
+				// Doesn't return an error
+				if (load_number(val, input))
 				{
 					ret = val;
 				}
@@ -217,9 +262,8 @@ static void parse_value(fa_json& ret, std::string::const_iterator& it, std::stri
 			}
 			else
 			{
-				err->code = fa_json_errno::unexpected_character;
-				err->description = "Unexpected character " + std::string(1, *it) + ".";
-				err->it = it;
+				error.code = fa_json_errno::unexpected_character;
+				error.description = "Unexpected character " + std::string(1, c) + ".";
 			}
 		}
 	}
@@ -227,64 +271,67 @@ static void parse_value(fa_json& ret, std::string::const_iterator& it, std::stri
 	{
 		ret = fa_json::object();
 	}
+
+	return error;
 }
 
-void fa_json::parse(const std::string& code, fa_json_error* err)
+fa_json_error fa_json::load(std::istream& input)
 {
-	auto it = code.begin();
-	auto end = code.end();
-
 	fa_json_error error;
 
-	if (it != end)
-		parse_value(*this, it, end, &error);
+	if (!input.eof())
+		error = load_value(*this, input);
 	else
 	{
 		*this = fa_json::object();
 	}
 
-	if (err)
-		*err = error;
+	return error;
 }
 
-static void dump_value(std::string& ret, const fa_json& value);
-
-static void dump_array(std::string& ret, const fa_json::arr& value)
+fa_json_error fa_json::loads(const std::string& code)
 {
-	ret.push_back('[');
+	std::stringstream ss;
+
+	ss << code;
+
+	return load(ss);
+}
+
+static void dump_value(std::ostream& ret, const fa_json& value);
+
+static void dump_array(std::ostream& ret, const fa_json::arr& value)
+{
+	ret << '[';
 
 	for (size_t i = 0; i < value.size(); i++)
 	{
 		dump_value(ret, value[i]);
 		if (i < value.size() - 1)
-			ret.push_back(',');
+			ret << ',';
 	}
 
-	ret.push_back(']');
+	ret << ']';
 }
 
-static void dump_floating(std::string& ret, fa_json::floating value)
+static void dump_floating(std::ostream& ret, fa_json::floating value)
 {
-	ret += std::to_string(value);
+	ret << value;
 }
 
-static void dump_integer(std::string& ret, fa_json::integer value)
+static void dump_integer(std::ostream& ret, fa_json::integer value)
 {
-	ret += std::to_string(value);
+	ret << value;
 }
 
-static void dump_string(std::string& ret, const fa_json::string& value)
+static void dump_string(std::ostream& ret, const fa_json::string& value)
 {
-	ret.push_back('"');
-
-	ret += value;
-
-	ret.push_back('"');
+	ret << '"' << value << '"';
 }
 
-static void dump_object(std::string& ret, const fa_json::object& value)
+static void dump_object(std::ostream& ret, const fa_json::object& value)
 {
-	ret.push_back('{');
+	ret << '{';
 
 	size_t i = 0;
 
@@ -292,20 +339,20 @@ static void dump_object(std::string& ret, const fa_json::object& value)
 	{
 		dump_string(ret, key);
 
-		ret.push_back(':');
+		ret << ':';
 
 		dump_value(ret, val);
 
 		if (i < value.size() - 1)
-			ret.push_back(',');
+			ret << ',';
 
 		i++;
 	}
 
-	ret.push_back('}');
+	ret << '}';
 }
 
-static void dump_value(std::string& ret, const fa_json& value)
+static void dump_value(std::ostream& ret, const fa_json& value)
 {
 	switch (value.index())
 	{
@@ -331,26 +378,23 @@ static void dump_value(std::string& ret, const fa_json& value)
 	}
 }
 
-std::string fa_json::dump() const
+void fa_json::dump(std::ostream& output) const
 {
-	std::string ret;
+	dump_value(output, *this);
+}
+
+std::string fa_json::dumps() const
+{
+	std::stringstream ret;
 
 	dump_value(ret, *this);
 
-	return ret;
+	return ret.str();
 }
 
 std::istream& operator>>(std::istream& input, fa_json& output)
 {
-	std::string line;
-	std::string source;
-
-	while (std::getline(input, line))
-		source += line;
-
-	fa_json_error err;
-
-	output.parse(source, &err);
+	fa_json_error err = output.load(input);
 
 	if (err.code != fa_json_errno::ok)
 	{
@@ -362,10 +406,6 @@ std::istream& operator>>(std::istream& input, fa_json& output)
 
 std::ostream& operator<<(std::ostream& output, const fa_json& input)
 {
-	return output << input.dump();
-}
-
-fa_json_error::fa_json_error(fa_json_errno err, const std::string& desc, std::string::const_iterator iterator)
-	: code(err), description(desc), it(iterator)
-{
+	input.dump(output);
+	return output;
 }

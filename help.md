@@ -104,9 +104,9 @@ Lists all mods using the given filters
 *Description*: Filters the list by the type of mods (zip archives/pure directories)<br>
 *Default*: `all`
 
-1.1.2. `-f (all|active|inactive)`
+1.1.2. `-f (all|enabled|disabled)`
 
-*Description*: Filters the list by wether or not given mod is active.<br>
+*Description*: Filters the list by wether or not given mod is enabled.<br>
 *Default*: `all`
 
 1.1.3. `-r <expression>`
@@ -127,7 +127,7 @@ Checks validity of all mods. If no path/name is given, checks all directories wi
 ### 1.3. `info`
 
 ```cmd
-modmanager info <path>
+modmanager info <name/path>
 ```
 
 #### **Description**
@@ -138,7 +138,7 @@ Mod's author, title and code name, dependencies, version and wether or not it's 
 ### 1.4. `enable`
 
 ```cmd
-modmanager enable [<path>] [-r <expression>]
+modmanager enable [<path>] [-t (all|zip|dir)] [-f (all|enabled|disabled)] [-r <expression>]
 ```
 
 where
@@ -150,16 +150,26 @@ modmanager enable
 is equivalent to
 
 ```cmd
-modmanager enable -r .+
+modmanager enable -t all -f all -r .+
 ```
 
 **Description**
 
-Enables specific mods or filtered mods. If a path is given, the mod is enabled. If not, all mods are enabled after filtering with regex.
+Enables specific mods or filtered mods. If a path is given, the mod is enabled. If not, all mods are enabled after filtering with given filters.
 
 **Options:**
 
-1.4.1. `-r <expression>`
+1.4.1. `-t (all|zip|dir)`
+
+*Description*: Filters the mods by the type of mods (zip archives/pure directories)<br>
+*Default*: `all`
+
+1.4.2. `-f (all|active|inactive)`
+
+*Description*: Filters the mods by wether or not given mod is active.<br>
+*Default*: `all`
+
+1.4.3. `-r <expression>`
 
 *Description*: Filters the mods using the given regex string. Only the directory/archive name (not extension) is matched. The rest of the path is not.<br>
 *Default*: `.+`
@@ -167,7 +177,7 @@ Enables specific mods or filtered mods. If a path is given, the mod is enabled. 
 ### 1.5. `disable`
 
 ```cmd
-modmanager disable [<path>] [-r <expression>] [--includebase]
+modmanager disable [<path>] [-t (all|zip|dir)] [-f (all|enabled|disabled)] [-r <expression>] [--includebase]
 ```
 
 where
@@ -179,18 +189,28 @@ modmanager disable
 is equivalent to
 
 ```cmd
-modmanager disable -r .+
+modmanager disable -t all -f all -r .+
 ```
 
 **Description**
 
-Disables specific mod or filtered mods. If a path is given, the mod is disabled. If not, all mods are disabled after filtering with regex.
+Disables specific mod or filtered mods. If a path is given, the mod is disabled. If not, all mods are disabled after filtering with given filters.
 
 *Warning: This command may disable base mod.*
 
 **Options:**
 
-1.5.1. `-r <expression>`
+1.5.1. `-t (all|zip|dir)`
+
+*Description*: Filters the mods by the type of mods (zip archives/pure directories)<br>
+*Default*: `all`
+
+1.5.2. `-f (all|active|inactive)`
+
+*Description*: Filters the mods by wether or not given mod is active.<br>
+*Default*: `all`
+
+1.5.3. `-r <expression>`
 
 *Description*: Filters the mods using the given regex string. Only the directory/archive name (not extension) is matched. The rest of the path is not.<br>
 *Default*: `.+`
@@ -383,17 +403,27 @@ modmanager rmmod <name>
 
 #### **Description**
 
-Removes given mod. This also adds it to ignored mods if its parent directory is included in additional directories. Re-adding the mod or removing the directory will remove it from the ignored mods.
+Removes given mod. This also adds it to ignored mods if its parent directory is included in additional directories. Re-adding the mod will remove it from the ignored mods.
 
 ### 1.13. `rmdir`
 
 ```cmd
-modmanager rmdir <name>
+modmanager rmdir <path>
 ```
 
 #### **Description**
 
-Removes given additional. This does not remove explicitly added mods (additional_mods) even if their parent directory is the one being removed.
+Removes given mod directory. This does not remove explicitly added mods (additional_mods) even if their parent directory is the one being removed.
+
+### 1.14. `unignore`
+
+```cmd
+modmanager unignore <name>
+```
+
+#### **Description**
+
+Removes given mod from ignored mods.
 
 ## 2. `prototype`
 

@@ -42,11 +42,11 @@ fa_Error fa_ModManager::add_mod(const std::filesystem::path& path, bool add_addi
 {
 	fa_Error error;
 
-	if (add_additional)
-		additional_mods.insert(path);
-
 	fa_Mod mod;
 	error = load_mod_info(path, &mod, log_stream);
+
+	if (add_additional)
+		additional_mods.insert({ fs->getCorrectPath(path), path });
 
 	if (error.code == fa_errno::invalid_json || error.code == fa_errno::invalid_filename || error.code == fa_errno::invalid_version_string)
 	{
@@ -89,16 +89,58 @@ fa_Error fa_ModManager::add_mod(const std::filesystem::path& path, bool add_addi
 	return error;
 }
 
+void fa_ModManager::remove_mod(const std::string& name)
+{
+	auto mod_it = mods.find(name);
+
+	if (mod_it != mods.end())
+	{
+		const auto& mod_path = mod_it->second.path;
+		auto parent_path = mod_path.parent_path();
+
+
+		auto additional_it = additional_mods.find(mod_path);
+		auto dir_it = mod_directories.find(parent_path);
+
+		if (additional_it != additional_mods.end())
+		{
+			additional_mods.erase(additional_it);
+		}
+
+		if (dir_it != mod_directories.end())
+		{
+			ignored_mods.insert({ name, mod_it->second.path });
+		}
+
+		mods.erase(mod_it);
+	}
+}
+
 void fa_ModManager::add_ignored_mod(const std::string& name)
 {
-	ignored_mods.insert(name);
-
-	// Unload mods
+	// Unload mod
+	std::filesystem::path path;
 	auto mod_it = mods.find(name);
 	
 	if (mod_it != mods.end())
 	{
 		mods.erase(mod_it);
+		path = mod_it->second.path;
+	}
+
+	ignored_mods.insert({ name, path });
+}
+
+void fa_ModManager::remove_ignored_mod(const std::string& name, std::ostream& log_stream)
+{
+	auto it = ignored_mods.find(name);
+
+	if (it != ignored_mods.end())
+	{
+		std::filesystem::path path = it->second;
+		ignored_mods.erase(it);
+
+		add_mod(path, false, log_stream);
 	}
 }
 
@@ -111,21 +153,19 @@ fa_Error fa_ModManager::add_mod_directory(const std::filesystem::path& path, std
 
 	if (!fs->isDirectory(correct))
 	{
+		mod_directories.insert({ correct, path });
 		error.code = fa_errno::fs_entry_does_not_exist;
 		error.description = "Requested directory does not exist/is not a directory.";
 		log_stream << error.description << std::endl;
 		return error;
 	}
 
-	auto dir_it = std::find_if(mod_directories.begin(), mod_directories.end(), [this, &correct](const std::filesystem::path& p) -> bool {
-		return fs->getCorrectPath(p) == correct;
-		});
+	correct = std::filesystem::canonical(correct);
+	const auto& inserted = mod_directories.insert({ correct, path });
 
-	if (dir_it == mod_directories.end())
+	if (inserted.second)
 	{
 		// Add the dir and mods in it
-		mod_directories.insert(path);
-
 		for (const auto& entry : fs->getFilesInDirectory(correct))
 		{
 			std::filesystem::path mod_path = entry.path();
@@ -149,7 +189,31 @@ fa_Error fa_ModManager::add_mod_directory(const std::filesystem::path& path, std
 	return error;
 }
 
-fa_Error fa_ModManager::load_configuration(const std::filesystem::path& path, std::ostream& log_stream)
+void fa_ModManager::remove_mod_directory(const std::filesystem::path& path)
+{
+	if (fs->exists(path))
+	{
+		auto full_path = std::filesystem::canonical(fs->getCorrectPath(path));
+		auto dir_it = mod_directories.find(full_path);
+
+		if (dir_it != mod_directories.end())
+		{
+			for (auto mod_it = mods.begin(); mod_it != mods.end();)
+			{
+				auto additional_it = additional_mods.find(mod_it->second.path);
+
+				if (mod_it->second.path.parent_path() == full_path && additional_it == additional_mods.end())
+					mod_it = mods.erase(mod_it);
+				else
+					mod_it++;
+			}
+
+			mod_directories.erase(dir_it);
+		}
+	}
+}
+
+fa_Error fa_ModManager::load_configuration(const std::filesystem::path& path, const decider_func& decider, bool invert, std::ostream& log_stream)
 {
 	fa_Error error;
 
@@ -161,17 +225,9 @@ fa_Error fa_ModManager::load_configuration(const std::filesystem::path& path, st
 
 		std::ifstream file = fs->openFile(path);
 
-		std::string line;
-		std::string source;
-
-		while (std::getline(file, line))
-			source += line;
+		fa_json_error err = config.load(file);
 
 		file.close();
-
-		fa_json_error err;
-
-		config.parse(source, &err);
 
 		if (err.code != fa_json_errno::ok)
 		{
@@ -186,6 +242,11 @@ fa_Error fa_ModManager::load_configuration(const std::filesystem::path& path, st
 
 		if (config.index() == FA_JSON_OBJECT)
 		{
+			std::map<std::string, bool> previous_config;
+
+			for (const auto& [name, mod] : mods)
+				previous_config.insert({ name, mod.enabled });
+
 			const auto& object = std::get<fa_json::object>(config);
 
 			auto directories_it = object.find("directories");
@@ -269,7 +330,18 @@ fa_Error fa_ModManager::load_configuration(const std::filesystem::path& path, st
 					{
 						if (enabled.index() == FA_JSON_INTEGER)
 						{
-							mod_it->second.enabled = std::get<fa_json::integer>(enabled);
+							// decider(previous_enabled, new_enabled)
+
+							auto previous_it = previous_config.find(mod);
+							bool loaded_enabled = std::get<fa_json::integer>(enabled);
+
+							if (invert)
+								loaded_enabled = !loaded_enabled;
+
+							if (previous_it == previous_config.end())
+								mod_it->second.enabled = loaded_enabled;
+							else
+								mod_it->second.enabled = decider(previous_it->second, loaded_enabled);
 						}
 					}
 					else
@@ -299,15 +371,25 @@ void fa_ModManager::save_configuration(const std::filesystem::path& path, std::o
 	fa_json::arr directories;
 	fa_json::arr additional;
 	fa_json::object configuration;
+	fa_json::arr ignored;
 
 	for (const auto& dir : mod_directories)
-		directories.push_back(dir.string());
+		directories.push_back(dir.second.string());
 
 	for (const auto& mod : additional_mods)
-		additional.push_back(mod.string());
+		additional.push_back(mod.second.string());
+
+	for (const auto& mod : ignored_mods)
+		ignored.push_back(mod.first);
+
+	for (const auto& [name, mod] : mods)
+	{
+		configuration.insert({ name, (fa_json::integer)mod.enabled });
+	}
 
 	obj.insert({ "directories", directories });
 	obj.insert({ "additional", additional });
+	obj.insert({ "ignored", ignored });
 	obj.insert({ "configuration", configuration });
 
 	fa_json configuration_json = obj;
@@ -387,7 +469,6 @@ fa_Error fa_ModManager::load_mod_info(const std::filesystem::path& _path, fa_Mod
 		// Load info.json
 		fa_json info;
 		fa_json_error info_err;
-		std::string code;
 
 		if (is_dir)
 		{
@@ -402,12 +483,8 @@ fa_Error fa_ModManager::load_mod_info(const std::filesystem::path& _path, fa_Mod
 
 			auto info_stream = fs->openFile(path / "info.json");
 
-			std::string line;
-
-			while (std::getline(info_stream, line))
-			{
-				code += line;
-			}
+			// Has to be parsed here, as zip version may use other kind of stream.
+			info_err = info.load(info_stream);
 
 			info_stream.close();
 		}
@@ -480,8 +557,6 @@ fa_Error fa_ModManager::load_mod_info(const std::filesystem::path& _path, fa_Mod
 			mz_stream_os_delete(&stream);
 			*/
 		}
-
-		info.parse(code, &info_err);
 
 		if (info_err.code != fa_json_errno::ok)
 		{
@@ -619,4 +694,32 @@ fa_Error fa_ModManager::load_mod_info(const std::filesystem::path& _path, fa_Mod
 const std::map<std::string, fa_Mod>& fa_ModManager::get_mods() const
 {
 	return mods;
+}
+
+bool fa_ModManager::set_mod_enabled(const std::string& mod, bool enabled)
+{
+	auto it = mods.find(mod);
+
+	if (it != mods.end())
+	{
+		it->second.enabled = enabled;
+		return true;
+	}
+
+	return false;
+}
+
+bool fa_ModManager::set_mod_enabled(const std::map<std::string, fa_Mod>::const_iterator& mod, bool enabled)
+{
+	if (mod != mods.end())
+	{
+		// const iterator -> iterator trick
+		std::map<std::string, fa_Mod>::iterator it = mods.erase(mod, mod);
+
+		it->second.enabled = enabled;
+
+		return true;
+	}
+
+	return false;
 }

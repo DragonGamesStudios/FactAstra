@@ -33,4 +33,15 @@ private:
 
 	// Console commands
 	void cmd_modmanager_list(const std::vector<std::string>& args);
+	void cmd_modmanager_checkvalid(const std::vector<std::string>& args);
+	void cmd_modmanager_info(const std::vector<std::string>& args);
+	void cmd_modmanager_enable(const std::vector<std::string>& args);
+	void cmd_modmanager_disable(const std::vector<std::string>& args);
+	void cmd_modmanager_saveconfig(const std::vector<std::string>& args);
+	void cmd_modmanager_loadconfig(const std::vector<std::string>& args);
+	void cmd_modmanager_pushmod(const std::vector<std::string>& args);
+	void cmd_modmanager_pushdir(const std::vector<std::string>& args);
+	void cmd_modmanager_rmmod(const std::vector<std::string>& args);
+	void cmd_modmanager_rmdir(const std::vector<std::string>& args);
+	void cmd_modmanager_unignore(const std::vector<std::string>& args);
 };

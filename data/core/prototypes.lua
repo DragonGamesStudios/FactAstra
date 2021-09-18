@@ -1,0 +1,1 @@
+require "__$this__.prototypes.controller"

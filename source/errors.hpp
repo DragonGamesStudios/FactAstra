@@ -12,7 +12,9 @@ enum class fa_errno
 	invalid_filename,
 	mod_incompatible,
 	mod_ignored,
-	invalid_version_string
+	invalid_version_string,
+	lua_invalid_prototype,
+	lua_error
 };
 
 struct fa_Error

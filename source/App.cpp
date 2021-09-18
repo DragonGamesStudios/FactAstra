@@ -5,6 +5,9 @@
 #include <functional>
 #include <regex>
 
+static const char* prototype_files[] = { "prototypes.lua", "protityoes-fixes.lua", "prototype-final-fixes.lua" };
+static const int prototype_files_size = 3;
+
 // Deciders
 static bool decider_or(bool previous, bool loaded)
 {
@@ -64,7 +67,7 @@ fa_App::fa_App()
 	// __appdata__ is the game's appdata directory
 	//__root__ is the game's root, where the executable is placed
 	local_fs.addPathTemplate("__local__", local_fs.getCurrentPath());
-	local_fs.enterDir(local_fs.getCorrectPath(local_fs.getExecutable()));
+	local_fs.enterDir(local_fs.getCorrectPath(local_fs.getExecutable()).parent_path());
 	local_fs.addPathTemplate("__appdata__", appdata_fs.getCurrentPath());
 	local_fs.addPathTemplate("__root__", local_fs.getCurrentPath());
 
@@ -73,6 +76,7 @@ fa_App::fa_App()
 		{ "modmanager", false },
 		{ "savemanager", false },
 		{ "window", false },
+		{ "dontload", false },
 	};
 
 	startup_options = {
@@ -153,8 +157,14 @@ void fa_App::run(const std::vector<std::string>& args)
 	{
 		if (modmanager.add_mod_directory("__appdata__/mods/", log).code != fa_errno::ok)
 			return;
-		//modmanager.add_mod_directory("__root__/data/");
 	}
+
+	modmanager.add_mod_directory("__root__/data/", log);
+
+	// Load prototypes
+	if (!startup_flags.at("dontload"))
+		if (load(log).code != fa_errno::ok)
+			return;
 
 	// Console executed AT THE END!
 	if (startup_flags.at("console") || startup_flags.at("modmanager") || startup_flags.at("savemanager"))
@@ -255,6 +265,15 @@ void fa_App::console()
 		commands.insert({ "savemanager", {
 		} });
 
+	if (console_enabled)
+	{
+		commands.insert({ "prototype", {
+			{ "list", std::bind(&fa_App::cmd_prototype_list, this, std::placeholders::_1) },
+			{ "info", std::bind(&fa_App::cmd_prototype_info, this, std::placeholders::_1) },
+			{ "load", std::bind(&fa_App::cmd_prototype_load, this, std::placeholders::_1) },
+		} });
+	}
+
 	while (running)
 	{
 		std::cerr << ">>> ";
@@ -306,6 +325,130 @@ void fa_App::console()
 	}
 
 	std::cerr << "Terminating console." << std::endl;
+}
+
+fa_Error fa_App::load(std::ostream& log_stream)
+{
+	// Get mod order
+		// TODO: Implement dependency based ordering
+
+	log_stream << "Ordering mods..." << std::endl;
+
+	for (const auto& [name, mod] : loaded_mods)
+	{
+		local_fs.deletePathTemplate("__" + name + "__");
+	}
+
+	storage.clear();
+	storage.create_storage_state();
+	loaded_mods.clear();
+	fa_LoadedMod added_mod;
+
+	for (const auto& [name, mod] : modmanager.get_mods())
+	{
+		if (mod.enabled)
+		{
+			added_mod.name = name;
+			added_mod.title = mod.title;
+			added_mod.loaded = true;
+			added_mod.is_zip = mod.is_zip;
+			added_mod.path = mod.path;
+			added_mod.inner_path = mod.inner_path;
+
+			local_fs.addPathTemplate("__" + name + "__", mod.path);
+
+			loaded_mods.insert({ name, added_mod });
+		}
+	}
+
+	log_stream << "Loading prototypes..." << std::endl;
+
+	state_manager.set_prepare_function(std::bind(&fa_App::prepare_prototypes, this, std::placeholders::_1, std::placeholders::_2));
+	state_manager.set_cleanup_function(std::bind(&fa_App::cleanup_prototypes, this, std::placeholders::_1, std::placeholders::_2));
+
+	fa_Error error;
+
+	for (int i = 0; i < prototype_files_size; i++)
+	{
+		for (auto& [name, mod] : loaded_mods)
+		{
+			state_manager.create_state(&mod, 0);
+
+			std::tuple<fa_LoadedMod*, int, fa_Error*> data(&mod, i, &error);
+			state_manager.execute_function(std::bind(&fa_App::execute_prototypes, this, std::placeholders::_1, std::placeholders::_2), &data);
+
+			state_manager.delete_state(&mod);
+
+			if (error.code != fa_errno::ok)
+				break;
+		}
+
+		if (error.code != fa_errno::ok)
+			break;
+	}
+
+	// Load
+	if (error.code == fa_errno::ok)
+		storage.load();
+
+	storage.close_storage_state();
+
+	if (error.code != fa_errno::ok)
+		log_stream << error.description << std::endl;
+
+	return error;
+}
+
+void fa_App::prepare_prototypes(lua_State* L, void* udata)
+{
+	fa_LoadedMod* mod = (fa_LoadedMod*)udata;
+
+	fa_util::lua_prepare_default_state(L, &local_fs);
+
+	storage.set_current_mod(mod);
+
+	// Push storage
+	storage.push(L);
+	lua_setglobal(L, "prototypes");
+
+	local_fs.addPathTemplate("__$this__", mod->path);
+}
+
+void fa_App::execute_prototypes(lua_State* L, void* udata)
+{
+	std::tuple<fa_LoadedMod*, int, fa_Error*>* data = (std::tuple<fa_LoadedMod*, int, fa_Error*>*)udata;
+	std::filesystem::path valid_path = local_fs.getCorrectPath(std::get<0>(*data)->path) / prototype_files[std::get<1>(*data)];
+
+	std::filesystem::path current_path = local_fs.getCurrentPath();
+
+	fa_Error* err = std::get<2>(*data);
+
+	if (local_fs.exists(valid_path))
+	{
+		lua_pushcfunction(L, fa_util::lua_generic_error_handler);
+
+		if (luaL_loadfile(L, valid_path.string().c_str()) || lua_pcall(L, 0, LUA_MULTRET, 1))
+		{
+			err->code = fa_errno::lua_error;
+
+			// Retrieve error message
+			std::string msg, trc;
+
+			if (lua_istable(L, -1))
+				fa_util::lua_retrieve_error_message(L, -1, &msg, &trc);
+			else
+				msg = lua_tostring(L, -1);
+
+			err->description = msg + "\n" + trc;
+		}
+	}
+}
+
+void fa_App::cleanup_prototypes(lua_State* L, void* udata)
+{
+	fa_LoadedMod* mod = (fa_LoadedMod*)udata;
+
+	local_fs.deletePathTemplate("$this");
 }
 
 void fa_App::cmd_modmanager_list(const std::vector<std::string>& args)
@@ -698,4 +841,96 @@ void fa_App::cmd_modmanager_unignore(const std::vector<std::string>& args)
 	}
 	else
 		std::cerr << "Missing value for parameter <name>." << std::endl;
+}
+
+void fa_App::cmd_prototype_list(const std::vector<std::string>& args)
+{
+	std::map<std::string, std::string> options = {
+		{ "t", "prototype" },
+		{ "r", ".+" }
+	};
+
+	std::map<std::string, bool> flags = {
+		{ "recursive", false }
+	};
+	std::vector<std::string> unparsed;
+
+	parse_arguments(args, options, flags, unparsed);
+
+	std::string prot_type = options.at("t");
+	std::regex prot_regex(options.at("r"));
+	bool is_recursive = flags.at("recursive");
+
+	if (!args.size())
+		is_recursive = true;
+
+	auto it = prototype_types.find(prot_type);
+
+	if (it == prototype_types.end())
+	{
+		std::cerr << "Invalid prototype type." << std::endl;
+		return;
+	}
+
+	const auto& type_id = it->second;
+
+	std::map<fa_LuaPrototype::type_id_type, fa_PrototypeSet::MappedPtr<const fa_LuaPrototype>> prototypes;
+
+	storage.find_prototypes(prototypes, type_id, is_recursive);
+
+	for (const auto& [prot_type_id, prot_map] : prototypes)
+	{
+		for (const auto& [name, prot] : prot_map)
+		{
+			std::cout << std::endl
+				<< "Type: " << prot->get_type_name() << std::endl
+				<< "Name: " << prot->get_name() << std::endl
+				<< "Id: " << prot->get_id() << std::endl;
+		}
+	}
+}
+
+void fa_App::cmd_prototype_load(const std::vector<std::string>& args)
+{
+	load(std::cout);
+}
+
+void fa_App::cmd_prototype_info(const std::vector<std::string>& args)
+{
+	std::map<std::string, std::string> options = {};
+	std::map<std::string, bool> flags;
+	std::vector<std::string> unparsed;
+
+	parse_arguments(args, options, flags, unparsed);
+
+	if (unparsed.size() >= 2)
+	{
+		std::string type = unparsed[0];
+
+		auto it = prototype_types.find(type);
+
+		if (it == prototype_types.end())
+		{
+			std::cerr << "Given prototype type does not exist." << std::endl;
+			return;
+		}
+
+		fa_LuaPrototype::type_id_type type_id = it->second;
+
+		std::string name = unparsed[1];
+
+		auto ptr = storage.get_prototype(type_id, name);
+
+		if (!ptr)
+		{
+			std::cerr << "Given prototype does not exist." << std::endl;
+			return;
+		}
+
+		std::cout << ptr->get_string() << std::endl;
+	}
+	else if (unparsed.size() == 1)
+		std::cerr << "Missing value for parameter <prototype name>." << std::endl;
+	else
+		std::cerr << "Missing value for parameter <prototype type>." << std::endl;
 }

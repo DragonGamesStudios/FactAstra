@@ -454,7 +454,7 @@ Lists all prototypes using the given filters.
 2.1.1. `-t <prototype type name>`
 
 *Description*: Specifies what type's prototypes to list.<br>
-*Default*: `base`
+*Default*: `prototype`
 
 2.1.2. `-r <expression>`
 
@@ -469,34 +469,17 @@ Lists all prototypes using the given filters.
 ### 2.2. `load`
 
 ```cmd
-modmanager load
+prototype load
 ```
 
 #### **Description**
 
 (Re)loads the mods and (re)parses the prototypes. Cannot be run when a game session is active.
 
-### 2.3. `typeinfo`
+### 2.3. `info`
 
 ```cmd
-modmanager typeinfo <prototype type name> [--noinherit]
-```
-
-#### **Description**
-
-Displays information about the given prototype type.
-
-**Options:**
-
-2.3.1. `--noinherit`
-
-*Description*: If present, only directly defined fields are listed out.
-*Default*: Inactive.
-
-### 2.4. `protinfo`
-
-```cmd
-modmanager protinfo <prototype type name> <prototype name>
+prototype info <prototype type name> <prototype name>
 ```
 
 #### **Description**
@@ -546,12 +529,20 @@ Executes the given code/file.
 
 # Lua modding
 
+## General
+
+FactAstra disables some default Lua libraries for safety. It also introduces its own version of `require`.
+
+`require` function takes in a string representing a path. As in standard Lua, the elements of the path should be seperated by `.` and the file should not have `.lua` on its end. However, FactAstra version also supports path templates. Their syntax is `__template__`. Using them, you can access executable directory (`__root__`), current directory (`__local__`), game's AppData directory (`__appdata__`) and any loaded mod (`__mod_name__`). `__$this__` represents the currently executed mod directory and is the only way to comfortably access files relatively. Path templates must be located at the very beginning of the path.
+
+## Loading
+
 When the application is loaded, it goes through the following steps:
 
 1. Prototype loading step
 
-Prototype loading step is when all general game data is loaded. This is also when `data.lua`, `data-updates.lua` and `data-final-fixes.lua` is executed.
-To see deeper insight into this process, go to `lua-data.md`.
+Prototype loading step is when all general game data is loaded. This is also when `prototypes.lua`, `prototypes-fixes.lua` and `prototypes-final-fixes.lua` is executed.
+To see deeper insight into this process, go to `lua-prototypes.md`.
 
 When a game is started, it goes through the following steps:
 

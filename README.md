@@ -30,8 +30,10 @@ cmake -B ./build -G <your generator> .
 FactAstra project has the following dependencies:
 * [Spectre2D](https://github.com/DragonGamesStudios/Spectre2D)
 * [zlib](http://www.zlib.net/)
+* [minizip-ng](https://github.com/zlib-ng/minizip-ng)
+* [lua](http://www.lua.org/)
 
-Spectre2D library also has its dependencies. Since it's static, they also need to be included in the build.
+Spectre2D also has its dependencies. Since it's static, they also need to be included in the build.
 
 Note, that the project is tested on Windows/Linux. Thus, if there are compilation/build errors, first check if there are all library files in the right directory (`extlibs/<System>/<Configuration>`). If not, you'll probably need to build the libraries from source.
 

@@ -1,0 +1,7 @@
+{
+    "title": "FactAstra Core",
+    "name": "core",
+    "version": "0.0",
+    "factastra_version": "0.0",
+    "description": "The core of FactAstra. Cannot be removed/disabled from configuration."
+}

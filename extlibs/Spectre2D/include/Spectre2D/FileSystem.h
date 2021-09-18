@@ -41,6 +41,7 @@ namespace sp
 		bool exists(const fs::path& path) const;
 
 		bool addPathTemplate(const std::string& temp, const fs::path& target);
+		void deletePathTemplate(const std::string& temp);
 		static bool isTemplate(const std::string& name);
 
 		fs::path getCorrectPath(const fs::path& path) const;

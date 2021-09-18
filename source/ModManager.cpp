@@ -2,9 +2,9 @@
 #include "json.hpp"
 #include "errors.hpp"
 
-#include <minizip/mz_zip.h>
-#include <minizip/mz_strm_os.h>
-#include <minizip/mz.h>
+//#include <minizip/mz_zip.h>
+//#include <minizip/mz_strm_os.h>
+//#include <minizip/mz.h>
 
 static fa_Error read_string_field(const fa_json::object& obj, const std::string& field, std::string* value)
 {
@@ -48,7 +48,7 @@ fa_Error fa_ModManager::add_mod(const std::filesystem::path& path, bool add_addi
 	if (add_additional)
 		additional_mods.insert({ fs->getCorrectPath(path), path });
 
-	if (error.code == fa_errno::invalid_json || error.code == fa_errno::invalid_filename || error.code == fa_errno::invalid_version_string)
+	if (error.code == fa_errno::invalid_json || error.code == fa_errno::invalid_filename || error.code == fa_errno::invalid_version_string || error.code == fa_errno::fs_entry_does_not_exist)
 	{
 		return error;
 	}
@@ -391,6 +391,7 @@ void fa_ModManager::save_configuration(const std::filesystem::path& path, std::o
 	obj.insert({ "additional", additional });
 	obj.insert({ "ignored", ignored });
 	obj.insert({ "configuration", configuration });
+	obj.insert({ "factastra_version", factastra_version.dump() });
 
 	fa_json configuration_json = obj;
 
